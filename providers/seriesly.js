@@ -33,31 +33,21 @@
 
 // ====================== CREDENCIALES DE SESIÓN (FALLBACK) ======================
 // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-//  Desde la v1.1.0 NO hace falta editar este archivo: cada usuario pega
-//  sus cookies en la PROPIA app de Nuvio
-//  (Settings -> Plugins -> "series.ly" -> ajustes; ver onSettings()).
-//  Esos valores llegan en globalThis.SCRAPER_SETTINGS y tienen prioridad.
-//
-//  Estas constantes son solo el FALLBACK (compatibilidad con versiones
-//  anteriores / uso fuera de la app): se usan unicamente cuando
-//  SCRAPER_SETTINGS no trae valor para la clave correspondiente.
+//  NO hace falta editar este archivo: cada usuario pega sus cookies en la
+//  PROPIA app de Nuvio (Settings -> Plugins -> "series.ly" -> ajustes;
+//  ver onSettings()). Esos valores llegan en globalThis.SCRAPER_SETTINGS y
+//  tienen prioridad sobre estas constantes.
 //
 //  Cómo obtener las cookies (ver README.md para más detalle):
 //    1. Entra en https://series.ly e inicia sesión en tu navegador.
 //    2. Pulsa F12 -> pestaña "Application"/"Almacenamiento" -> Cookies
 //       -> https://series.ly
-//    3. Copia el VALOR de la cookie "seriesly_session" (tal cual aparece,
-//       suele terminar en "%3D").
+//    3. Copia el VALOR de la cookie "seriesly_session".
 //    4. Copia el VALOR de la cookie "XSRF-TOKEN" (se acepta URL-encoded o
 //       decodificado; el plugin normaliza ambos formatos).
 //
 //  La sesión caduca aproximadamente al mes: cuando el plugin deje de
 //  devolver enlaces, repite el proceso y actualiza los ajustes en la app.
-//
-//  Los valores que hay a continuación son cookies de PRUEBA facilitadas
-//  con el proyecto, solo como EJEMPLO de formato. NOTA: esa cuenta de prueba
-//  fue suspendida por exceso de peticiones durante las verificaciones y su
-//  sesión ya no es válida: cada usuario debe configurar las suyas en la app.
 // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 var SESSION_COOKIE = ''; // fallback: cookie seriesly_session
 var XSRF_TOKEN = ''; // fallback: cookie XSRF-TOKEN
@@ -78,15 +68,15 @@ var LANGUAGE_RULES = [
   [/subtitul/i, 'Subtitulado', 2]
 ];
 
-// series.ly aplica rate-limit (HTTP 429) y puede SUSPENDER la cuenta por
-// "exceso de peticiones" si se hacen ráfagas (verificado en vivo: un episodio
-// puede tener 45 enlaces). Por eso la resolución va con concurrencia baja,
-// ritmo limitado y un tope de enlaces por consulta: sobra para ver el
-// contenido y protege la cuenta del usuario.
-var MAX_CONCURRENT_RESOLVES = 3;
-var RESOLVE_STAGGER_MS = 300;   // pausa entre peticiones de cada trabajador
-var MAX_LINKS_TO_RESOLVE = 24;  // tras ordenar por idioma (mejores primero)
-var MAX_RETRIES = 3;
+// series.ly aplica rate-limit (HTTP 429) y SUSPENDE la cuenta por "exceso de
+// peticiones" ante ráfagas (verificado en vivo DOS veces). En el runtime de
+// Nuvio NO hay temporizadores, así que las pausas no existen: la única
+// protección real es resolver MUY POCOS enlaces y de uno en uno.
+var NO_TIMERS = typeof setTimeout !== 'function';
+var MAX_CONCURRENT_RESOLVES = NO_TIMERS ? 1 : 3; // Nuvio: 1 (secuencial)
+var RESOLVE_STAGGER_MS = 300;   // pausa entre peticiones (solo si hay timers)
+var MAX_LINKS_TO_RESOLVE = NO_TIMERS ? 8 : 24;   // Nuvio: solo los 8 mejores
+var MAX_RETRIES = 1;            // reintentos mínimos para no multiplicar peticiones
 
 // ====================== Ajustes del usuario (Nuvio) ======================
 
@@ -557,6 +547,13 @@ function mapQuality(q) {
 
 // ====================== Paso 3: resolver enlace ======================
 
+/** Detalle del primer fallo de resolución (para el modo diagnóstico). */
+var RESOLVE_DIAG = '';
+
+function noteResolveFail(reason) {
+  if (!RESOLVE_DIAG) RESOLVE_DIAG = reason;
+}
+
 /**
  * GET /t/{token} -> {"e":"<iframe src=\"...\">"}. Extrae el src del iframe.
  * Devuelve { url } | { suspended: true } | null.
@@ -567,9 +564,13 @@ function resolveToken(tokenUrl) {
     'X-Requested-With': 'XMLHttpRequest',
     'Referer': BASE_URL + '/'
   }).then(function (r) {
-    if (!r) return null;
+    if (!r) { noteResolveFail('red/HTTP 0 en /t/'); return null; }
     if (isSuspended(r.res, r.text)) return { suspended: true };
-    if (!r.res.ok) return null;
+    if (!r.res.ok) {
+      noteResolveFail('HTTP ' + r.res.status +
+        (r.res.statusText ? ' (' + r.res.statusText + ')' : '') + ' en /t/');
+      return null;
+    }
     var body = r.text || '';
     var html = body;
     try {
@@ -577,7 +578,10 @@ function resolveToken(tokenUrl) {
       if (data && typeof data.e === 'string') html = data.e;
     } catch (e) { /* no era JSON: se intenta regex sobre el cuerpo crudo */ }
     var m = html.match(/src=\\?"([^"\\]+)/);
-    if (!m) return null;
+    if (!m) {
+      noteResolveFail('respuesta de /t/ sin iframe: ' + String(body).replace(/\s+/g, ' ').slice(0, 60));
+      return null;
+    }
     var url = m[1];
     // Solo embeds absolutos y ajenos a series.ly (evita falsos positivos
     // de páginas HTML inesperadas, p. ej. assets de la página de suspensión).
@@ -771,7 +775,8 @@ function getStreamsInternal(tmdbId, mediaType, season, episode) {
           }
           return buildStreams(links, contentTitle).then(function (streams) {
             if (!streams.length && !LAST_DIAG) {
-              setDiag('Había enlaces pero ninguno se pudo resolver (tokens caducados o servidores caídos)');
+              setDiag('Había ' + links.length + ' enlaces pero ninguno se pudo resolver.' +
+                (RESOLVE_DIAG ? ' Causa: ' + RESOLVE_DIAG : ' Tokens caducados o servidores caídos.'));
             }
             return streams;
           });
@@ -786,6 +791,7 @@ function getStreamsInternal(tmdbId, mediaType, season, episode) {
 
 function getStreams(tmdbId, mediaType, season, episode) {
   LAST_DIAG = '';
+  RESOLVE_DIAG = '';
   return getStreamsInternal(tmdbId, mediaType, season, episode).then(function (streams) {
     if ((!streams || !streams.length) && diagEnabled()) return diagStream();
     return streams || [];
