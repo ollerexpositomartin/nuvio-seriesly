@@ -1,15 +1,21 @@
 {
-  "id": "seriesly-provider",
   "name": "series.ly (Español/Latino, con sesión)",
-  "version": "1.1.1",
-  "author": "kimi",
+  "version": "1.1.2",
   "description": "Películas y series en castellano, latino y subtitulado desde series.ly usando tu propia sesión",
-  "supportedTypes": ["movie", "tv"],
-  "hasSettings": true,
-  "filename": "providers/seriesly.js",
-  "enabled": true,
-  "contentLanguage": ["es"],
-  "formats": ["mp4", "m3u8"],
-  "disabledPlatforms": [],
-  "supportsExternalPlayer": true
+  "author": "kimi",
+  "scrapers": [
+    {
+      "id": "seriesly-provider",
+      "name": "series.ly",
+      "description": "Streams de series.ly con tu sesión (castellano, latino y subtitulado)",
+      "version": "1.1.2",
+      "filename": "providers/seriesly.js",
+      "supportedTypes": ["movie", "tv"],
+      "enabled": true,
+      "hasSettings": true,
+      "contentLanguage": ["es"],
+      "formats": ["mp4", "m3u8"],
+      "supportsExternalPlayer": true
+    }
+  ]
 }
