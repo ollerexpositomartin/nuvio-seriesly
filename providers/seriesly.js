@@ -695,7 +695,7 @@ function buildStreams(links, contentTitle, referer) {
  */
 function slugify(title) {
   var s = String(title || '').toLowerCase();
-  try { s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) { /* noop */ }
+  try { s = s.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) { /* noop */ }
   return s.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
