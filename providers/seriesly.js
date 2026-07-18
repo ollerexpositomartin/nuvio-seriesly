@@ -33,21 +33,31 @@
 
 // ====================== CREDENCIALES DE SESIÓN (FALLBACK) ======================
 // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-//  NO hace falta editar este archivo: cada usuario pega sus cookies en la
-//  PROPIA app de Nuvio (Settings -> Plugins -> "series.ly" -> ajustes;
-//  ver onSettings()). Esos valores llegan en globalThis.SCRAPER_SETTINGS y
-//  tienen prioridad sobre estas constantes.
+//  Desde la v1.1.0 NO hace falta editar este archivo: cada usuario pega
+//  sus cookies en la PROPIA app de Nuvio
+//  (Settings -> Plugins -> "series.ly" -> ajustes; ver onSettings()).
+//  Esos valores llegan en globalThis.SCRAPER_SETTINGS y tienen prioridad.
+//
+//  Estas constantes son solo el FALLBACK (compatibilidad con versiones
+//  anteriores / uso fuera de la app): se usan unicamente cuando
+//  SCRAPER_SETTINGS no trae valor para la clave correspondiente.
 //
 //  Cómo obtener las cookies (ver README.md para más detalle):
 //    1. Entra en https://series.ly e inicia sesión en tu navegador.
 //    2. Pulsa F12 -> pestaña "Application"/"Almacenamiento" -> Cookies
 //       -> https://series.ly
-//    3. Copia el VALOR de la cookie "seriesly_session".
+//    3. Copia el VALOR de la cookie "seriesly_session" (tal cual aparece,
+//       suele terminar en "%3D").
 //    4. Copia el VALOR de la cookie "XSRF-TOKEN" (se acepta URL-encoded o
 //       decodificado; el plugin normaliza ambos formatos).
 //
 //  La sesión caduca aproximadamente al mes: cuando el plugin deje de
 //  devolver enlaces, repite el proceso y actualiza los ajustes en la app.
+//
+//  Los valores que hay a continuación son cookies de PRUEBA facilitadas
+//  con el proyecto, solo como EJEMPLO de formato. NOTA: esa cuenta de prueba
+//  fue suspendida por exceso de peticiones durante las verificaciones y su
+//  sesión ya no es válida: cada usuario debe configurar las suyas en la app.
 // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 var SESSION_COOKIE = ''; // fallback: cookie seriesly_session
 var XSRF_TOKEN = ''; // fallback: cookie XSRF-TOKEN
@@ -72,10 +82,10 @@ var LANGUAGE_RULES = [
 // peticiones" ante ráfagas (verificado en vivo DOS veces). En el runtime de
 // Nuvio NO hay temporizadores, así que las pausas no existen: la única
 // protección real es resolver MUY POCOS enlaces y de uno en uno.
-var NO_TIMERS = typeof setTimeout !== 'function';
-var MAX_CONCURRENT_RESOLVES = NO_TIMERS ? 1 : 3; // Nuvio: 1 (secuencial)
+var HAS_TIMERS_CFG = typeof setTimeout !== 'function';
+var MAX_CONCURRENT_RESOLVES = HAS_TIMERS_CFG ? 1 : 3; // Nuvio: 1 (secuencial)
 var RESOLVE_STAGGER_MS = 300;   // pausa entre peticiones (solo si hay timers)
-var MAX_LINKS_TO_RESOLVE = NO_TIMERS ? 8 : 24;   // Nuvio: solo los 8 mejores
+var MAX_LINKS_TO_RESOLVE = HAS_TIMERS_CFG ? 8 : 24;   // Nuvio: solo los 8 mejores
 var MAX_RETRIES = 1;            // reintentos mínimos para no multiplicar peticiones
 
 // ====================== Ajustes del usuario (Nuvio) ======================
@@ -558,11 +568,12 @@ function noteResolveFail(reason) {
  * GET /t/{token} -> {"e":"<iframe src=\"...\">"}. Extrae el src del iframe.
  * Devuelve { url } | { suspended: true } | null.
  */
-function resolveToken(tokenUrl) {
+function resolveToken(tokenUrl, referer) {
   return getWithSession(tokenUrl, {
     'Accept': 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
-    'Referer': BASE_URL + '/'
+    'X-XSRF-TOKEN': xsrfHeaderValue(),
+    'Referer': referer || BASE_URL + '/'
   }).then(function (r) {
     if (!r) { noteResolveFail('red/HTTP 0 en /t/'); return null; }
     if (isSuspended(r.res, r.text)) return { suspended: true };
@@ -572,6 +583,9 @@ function resolveToken(tokenUrl) {
       return null;
     }
     var body = r.text || '';
+    if (body.indexOf('captcha_required') !== -1) {
+      return { captcha: true };
+    }
     var html = body;
     try {
       var data = JSON.parse(body);
@@ -593,7 +607,7 @@ function resolveToken(tokenUrl) {
 
 // ====================== Ensamblado de streams ======================
 
-function buildStreams(links, contentTitle) {
+function buildStreams(links, contentTitle, referer) {
   // Ajuste "includeSubbed" (toggle, por defecto true): si el usuario lo
   // desactiva en la app, los enlaces subtitulados se descartan ANTES del
   // orden y del tope de resolución.
@@ -629,14 +643,18 @@ function buildStreams(links, contentTitle) {
   // (anti rate-limit / anti-suspensión); cada resolución lleva sus propios
   // reintentos con backoff. Errores -> se omiten (nunca se lanza).
   // Si se detecta suspensión se abortan las resoluciones pendientes.
-  var state = { suspended: false };
+  var state = { suspended: false, captcha: false };
   return mapLimit(jobs, MAX_CONCURRENT_RESOLVES, function (job, i) {
-    if (state.suspended) return null;
+    if (state.suspended || state.captcha) return null;
     var stagger = i < MAX_CONCURRENT_RESOLVES ? 0 : RESOLVE_STAGGER_MS;
     return sleep(stagger).then(function () {
-      return state.suspended ? null : resolveToken(job.tokenUrl);
+      return (state.suspended || state.captcha) ? null : resolveToken(job.tokenUrl, referer);
     }).then(function (result) {
       if (!result) return null;
+      if (result.captcha) {
+        state.captcha = true;
+        return null;
+      }
       if (result.suspended) {
         state.suspended = true;
         log('cuenta series.ly suspendida temporalmente por exceso de peticiones; abortando resoluciones');
@@ -662,6 +680,9 @@ function buildStreams(links, contentTitle) {
         out.push(s);
       }
     });
+    if (state.captcha) {
+      setDiag('series.ly pide CAPTCHA para resolver enlaces: entra en series.ly desde el navegador, reproduce 2-3 enlaces a mano (resolviendo el captcha si aparece) y vuelve a probar');
+    }
     return out;
   });
 }
@@ -674,7 +695,7 @@ function buildStreams(links, contentTitle) {
  */
 function slugify(title) {
   var s = String(title || '').toLowerCase();
-  try { s = s.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) { /* noop */ }
+  try { s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) { /* noop */ }
   return s.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
@@ -773,7 +794,7 @@ function getStreamsInternal(tmdbId, mediaType, season, episode) {
             setDiag('La página no tiene enlaces: ' + pageUrl);
             return [];
           }
-          return buildStreams(links, contentTitle).then(function (streams) {
+          return buildStreams(links, contentTitle, pageUrl).then(function (streams) {
             if (!streams.length && !LAST_DIAG) {
               setDiag('Había ' + links.length + ' enlaces pero ninguno se pudo resolver.' +
                 (RESOLVE_DIAG ? ' Causa: ' + RESOLVE_DIAG : ' Tokens caducados o servidores caídos.'));
