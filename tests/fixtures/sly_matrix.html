@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Matrix (1999) - Película - series.ly</title>
+  <meta property="og:title" content="Matrix">
+</head>
+<body>
+  <!-- FIXTURE de prueba: página de película de series.ly (/peliculas/matrix).
+       Reconstruida a partir del formato verificado del scraper (handlers
+       Alpine x-on:click="playLink(...)"), ya que los fixtures originales de
+       /tmp no existían en el entorno. 8 enlaces playLink (>= 6 pedidos). -->
+  <div class="container" x-data="moviePlayer">
+    <h1>Matrix</h1>
+    <p class="year">1999</p>
+
+    <div class="links-list">
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/a1B2c3D4e5', '986296', '', {
+              server: 'FILEMOON', quality: 'HD 1080p', language: 'Español - España', uploader: 'admin' })">
+          <span>FILEMOON</span>
+        </button>
+      </div>
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/f6G7h8I9j0', '986297', '', {
+              server: 'VOE', quality: 'HD 720p', language: 'Español - España', uploader: 'admin' })">
+          <span>VOE</span>
+        </button>
+      </div>
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/k1L2m3N4o5', '986298', '', {
+              server: 'STREAMTAPE', quality: 'HD 720p', language: 'Español - Latino', uploader: 'usuario1' })">
+          <span>STREAMTAPE</span>
+        </button>
+      </div>
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/p6Q7r8S9t0', '986299', '', {
+              server: 'DOODSTREAM', quality: 'SD', language: 'Español - Latino', uploader: 'usuario2' })">
+          <span>DOODSTREAM</span>
+        </button>
+      </div>
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/u1V2w3X4y5', '986300', '', {
+              server: 'MIXDROP', quality: 'HD 1080p', language: 'Subtitulado', uploader: 'usuario3' })">
+          <span>MIXDROP</span>
+        </button>
+      </div>
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/z6A7b8C9d0', '986301', '', {
+              server: 'UQLOAD', quality: 'HD 720p', language: 'Subtitulado', uploader: 'usuario4' })">
+          <span>UQLOAD</span>
+        </button>
+      </div>
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/e1F2g3H4i5', '986302', '', {
+              server: 'FILEMOON', quality: 'CAM', language: 'Español - Latino', uploader: 'usuario5' })">
+          <span>FILEMOON</span>
+        </button>
+      </div>
+      <div class="link-item">
+        <button class="btn-play"
+          x-on:click="playLink('https://series.ly/t/j6K7l8M9n0', '986303', '', {
+              server: 'VOE', quality: 'HD 1080p', language: 'Español - España', uploader: 'usuario6' })">
+          <span>VOE</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

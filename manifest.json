@@ -1,0 +1,17 @@
+[
+  {
+    "id": "seriesly-provider",
+    "name": "series.ly (Español/Latino, con sesión)",
+    "version": "1.1.0",
+    "author": "kimi",
+    "description": "Películas y series en castellano, latino y subtitulado desde series.ly usando tu propia sesión",
+    "supportedTypes": ["movie", "tv"],
+    "hasSettings": true,
+    "filename": "providers/seriesly.js",
+    "enabled": true,
+    "contentLanguage": ["es"],
+    "formats": ["mp4", "m3u8"],
+    "disabledPlatforms": [],
+    "supportsExternalPlayer": true
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "name": "nuvio-seriesly",
+  "version": "1.1.0",
+  "description": "Plugin de Nuvio Media: streams en castellano, latino y subtitulado desde series.ly (con sesión de usuario)",
+  "main": "providers/seriesly.js",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node test.js"
+  },
+  "author": "kimi",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}
