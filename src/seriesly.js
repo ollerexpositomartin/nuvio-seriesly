@@ -121,6 +121,33 @@ function xsrfToken() {
   return settingValue('xsrf', XSRF_TOKEN);
 }
 
+// ====================== Diagnóstico (modo pruebas) ======================
+
+/**
+ * Motivo del último resultado vacío. La app de Nuvio NO muestra nada cuando
+ * getStreams devuelve [] (la pantalla de test solo pinta resultados si hay
+ * alguno), así que con el modo diagnóstico activado devolvemos una entrada
+ * explicativa para que el usuario vea la causa en la propia app.
+ */
+var LAST_DIAG = '';
+
+function setDiag(reason) {
+  LAST_DIAG = reason;
+  log(reason);
+}
+
+function diagEnabled() {
+  return !!getSettings().diagnostico;
+}
+
+function diagStream() {
+  return [{
+    name: 'series.ly - diagnóstico',
+    title: LAST_DIAG || 'Sin resultados: revisa cookies y estado de la cuenta',
+    url: 'about:error'
+  }];
+}
+
 // ============================== Utilidades ==============================
 
 /**
@@ -270,11 +297,11 @@ function isSessionExpired(res, body) {
 
 function warnIfExpired(res, body) {
   if (isSuspended(res, body)) {
-    log('cuenta series.ly suspendida temporalmente por exceso de peticiones; devolviendo []');
+    setDiag('Cuenta de series.ly SUSPENDIDA temporalmente por exceso de peticiones');
     return true;
   }
   if (isSessionExpired(res, body)) {
-    log('sesión series.ly caducada: renueva las cookies en los ajustes del plugin (ver README.md)');
+    setDiag('Sesión de series.ly CADUCADA: renueva las cookies en los ajustes del plugin');
     return true;
   }
   return false;
@@ -605,24 +632,27 @@ function buildStreams(links, contentTitle) {
 
 // ====================== Entrada principal ======================
 
-function getStreams(tmdbId, mediaType, season, episode) {
+function getStreamsInternal(tmdbId, mediaType, season, episode) {
   return Promise.resolve().then(function () {
-    if (!tmdbId || (mediaType !== 'movie' && mediaType !== 'tv')) return [];
+    if (!tmdbId || (mediaType !== 'movie' && mediaType !== 'tv')) {
+      setDiag('Petición inválida (id o tipo desconocido)');
+      return [];
+    }
     if (!hasSession()) {
-      log('sin sesión de series.ly: configura las cookies en los ajustes del plugin (Nuvio: Settings -> Plugins -> series.ly; ver README.md)');
+      setDiag('Sin sesión: configura las cookies en los ajustes del plugin (icono ⚙️)');
       return [];
     }
 
     return resolveTitleCandidates(tmdbId, mediaType).then(function (candidates) {
       var queries = buildQueryVariants(candidates);
       if (!queries.length) {
-        log('sin título TMDB para id ' + tmdbId);
+        setDiag('No se pudo obtener el título desde TMDB (id ' + tmdbId + ')');
         return [];
       }
 
       return searchOnSeriesly(tmdbId, mediaType, queries).then(function (post) {
         if (!post || !post.link) {
-          log('no encontrado en series.ly: TMDB ' + tmdbId);
+          if (!LAST_DIAG) setDiag('No encontrado en series.ly: TMDB ' + tmdbId);
           return [];
         }
 
@@ -637,24 +667,40 @@ function getStreams(tmdbId, mediaType, season, episode) {
         }
 
         return getWithSession(pageUrl).then(function (r) {
-          if (!r) return [];
+          if (!r) {
+            if (!LAST_DIAG) setDiag('Error de red cargando ' + pageUrl);
+            return [];
+          }
           if (warnIfExpired(r.res, r.text)) return [];
           if (!r.res.ok) {
-            log('página no disponible (' + r.res.status + '): ' + pageUrl);
+            setDiag('Página no disponible (' + r.res.status + '): ' + pageUrl);
             return [];
           }
           var links = extractLinks(r.text);
           if (!links.length) {
-            log('sin enlaces en ' + pageUrl);
+            setDiag('La página no tiene enlaces: ' + pageUrl);
             return [];
           }
-          return buildStreams(links, contentTitle);
+          return buildStreams(links, contentTitle).then(function (streams) {
+            if (!streams.length && !LAST_DIAG) {
+              setDiag('Había enlaces pero ninguno se pudo resolver (tokens caducados o servidores caídos)');
+            }
+            return streams;
+          });
         });
       });
     });
   }).catch(function (err) {
-    log('error inesperado: ' + (err && err.message ? err.message : err));
+    setDiag('Error inesperado: ' + (err && err.message ? err.message : err));
     return [];
+  });
+}
+
+function getStreams(tmdbId, mediaType, season, episode) {
+  LAST_DIAG = '';
+  return getStreamsInternal(tmdbId, mediaType, season, episode).then(function (streams) {
+    if ((!streams || !streams.length) && diagEnabled()) return diagStream();
+    return streams || [];
   });
 }
 
@@ -681,7 +727,10 @@ async function onSettings() {
         { label: 'Todos', value: 'all' }
       ], defaultValue: 'es'
     },
-    { type: 'toggle', key: 'includeSubbed', label: 'Incluir subtitulado', defaultValue: true }
+    { type: 'toggle', key: 'includeSubbed', label: 'Incluir subtitulado', defaultValue: true },
+    { type: 'header', label: 'Pruebas' },
+    { type: 'info', label: 'Activa el modo diagnóstico y pulsa "Probar proveedor" para ver el motivo si no hay streams.' },
+    { type: 'toggle', key: 'diagnostico', label: 'Modo diagnóstico', defaultValue: false }
   ];
 }
 
