@@ -151,10 +151,17 @@ function diagStream() {
 // ============================== Utilidades ==============================
 
 /**
- * fetch con timeout. Usa AbortController si existe (Node >= 16, RN moderno);
- * si no, degrada a una carrera contra reloj sin abortar el socket.
+ * fetch con timeout SOLO si hay temporizadores. El runtime de plugins de
+ * Nuvio (QuickJS) NO define setTimeout/clearTimeout: llamarlos rompe el
+ * plugin ("setTimeout is not defined"). En ese entorno se usa fetch tal cual
+ * (la app ya aplica su propio timeout global de 60s a cada ejecución).
  */
+var HAS_TIMERS = typeof setTimeout === 'function' && typeof clearTimeout === 'function';
+
 function fetchWithTimeout(url, options, timeoutMs) {
+  if (!HAS_TIMERS) {
+    return fetch(url, options || {});
+  }
   var ms = timeoutMs || REQUEST_TIMEOUT_MS;
 
   if (typeof AbortController !== 'undefined') {
@@ -185,7 +192,12 @@ function log(msg) {
   try { console.warn('[seriesly] ' + msg); } catch (e) { /* noop */ }
 }
 
+/**
+ * Pausa solo si hay temporizadores; en el runtime de Nuvio (sin setTimeout)
+ * se resuelve al instante (la concurrencia limitada ya frena las ráfagas).
+ */
 function sleep(ms) {
+  if (!HAS_TIMERS || !ms) return Promise.resolve();
   return new Promise(function (resolve) { setTimeout(resolve, ms); });
 }
 
