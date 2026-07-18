@@ -412,9 +412,13 @@ function buildQueryVariants(candidates) {
  * POST /api/search/posts {"query": ...}. Devuelve el post cuyo tmdb_id
  * coincide exactamente (normalizado a string), o null.
  */
+/** Detalle de los intentos de búsqueda (para el modo diagnóstico). */
+var SEARCH_DIAG = '';
+
 function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
   var wanted = String(tmdbId);
   var wantedType = mediaType === 'tv' ? 'serie' : 'movie';
+  SEARCH_DIAG = '';
 
   var attempt = function (index) {
     if (index >= queryVariants.length) return Promise.resolve(null);
@@ -432,12 +436,23 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
       }),
       body: JSON.stringify({ query: q })
     }).then(function (res) {
-      if (!res) return attempt(index + 1);
+      if (!res) {
+        SEARCH_DIAG += ' ["' + q + '": sin respuesta]';
+        return attempt(index + 1);
+      }
       return res.text().then(function (body) {
         if (warnIfExpired(res, body)) return null;
-        if (!res.ok) return attempt(index + 1);
+        if (!res.ok) {
+          SEARCH_DIAG += ' ["' + q + '": HTTP ' + res.status + ']';
+          return attempt(index + 1);
+        }
         var data = null;
         try { data = JSON.parse(body); } catch (e) { data = null; }
+        if (!data || typeof data !== 'object') {
+          var snippet = String(body || '').replace(/\s+/g, ' ').slice(0, 60);
+          SEARCH_DIAG += ' ["' + q + '": respuesta no-JSON: ' + snippet + ']';
+          return attempt(index + 1);
+        }
         var posts = data && data.posts;
         if (posts && posts.length) {
           for (var i = 0; i < posts.length; i++) {
@@ -447,10 +462,14 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
               if (!p.type || p.type === wantedType) return p;
             }
           }
+          SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, ninguno con tmdb_id ' + wanted + ']';
+        } else {
+          SEARCH_DIAG += ' ["' + q + '": 0 posts]';
         }
         return attempt(index + 1);
       });
-    }).catch(function () {
+    }).catch(function (err) {
+      SEARCH_DIAG += ' ["' + q + '": error de red ' + (err && err.message ? err.message : err) + ']';
       return attempt(index + 1);
     });
   };
@@ -664,7 +683,7 @@ function getStreamsInternal(tmdbId, mediaType, season, episode) {
 
       return searchOnSeriesly(tmdbId, mediaType, queries).then(function (post) {
         if (!post || !post.link) {
-          if (!LAST_DIAG) setDiag('No encontrado en series.ly: TMDB ' + tmdbId);
+          if (!LAST_DIAG) setDiag('No encontrado en series.ly: TMDB ' + tmdbId + '.' + SEARCH_DIAG);
           return [];
         }
 

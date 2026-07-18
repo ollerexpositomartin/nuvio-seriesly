@@ -1,6 +1,6 @@
 {
   "name": "nuvio-seriesly",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Plugin de Nuvio Media: streams en castellano, latino y subtitulado desde series.ly (con sesión de usuario)",
   "main": "providers/seriesly.js",
   "scripts": {

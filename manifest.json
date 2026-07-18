@@ -1,7 +1,7 @@
 {
   "id": "com.kimi.seriesly",
   "name": "series.ly (Español/Latino, con sesión)",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Películas y series en castellano, latino y subtitulado desde series.ly usando tu propia sesión",
   "author": "kimi",
   "scrapers": [
@@ -9,7 +9,7 @@
       "id": "seriesly-provider",
       "name": "series.ly",
       "description": "Streams de series.ly con tu sesión (castellano, latino y subtitulado)",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "filename": "providers/seriesly.js",
       "supportedTypes": ["movie", "tv"],
       "enabled": true,
