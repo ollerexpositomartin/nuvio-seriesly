@@ -68,8 +68,11 @@ var BASE_URL = 'https://series.ly';
 var USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 var REQUEST_TIMEOUT_MS = 15000;
 
-// Key pública de TMDB API v3 ampliamente usada por proyectos OSS (Cloudstream).
-var TMDB_API_KEY = 'a2c94e83e6c17c9d6dc8b909dd9baf62';
+// La TMDB API key la introduce cada usuario en los ajustes del plugin
+// (clave "tmdbKey"). Sin key, el plugin usa el fallback web de themoviedb.org.
+function tmdbApiKey() {
+  return settingValue('tmdbKey', '');
+}
 
 // Prioridad de idioma (menor = antes): España y Latino primero, Subtitulado después.
 var LANGUAGE_RULES = [
@@ -350,8 +353,31 @@ function decodeHtmlEntities(s) {
  */
 function resolveTitleCandidates(tmdbId, mediaType) {
   var kind = mediaType === 'tv' ? 'tv' : 'movie';
+  var apiKey = tmdbApiKey();
+
+  var fromWeb = function () {
+    var webUrl = 'https://www.themoviedb.org/' + kind + '/' + encodeURIComponent(String(tmdbId)) + '?language=es-ES';
+    return fetchWithTimeout(webUrl, { headers: { 'User-Agent': USER_AGENT }, redirect: 'follow' })
+      .then(function (res) { return res && res.ok ? res.text() : null; })
+      .catch(function () { return null; })
+      .then(function (html) {
+        if (!html) return [];
+        var m = html.match(/<meta property="og:title" content="([^"]+)"/);
+        if (!m) {
+          var t = html.match(/<title>([^<]+)<\/title>/);
+          if (!t) return [];
+          m = [null, t[1].replace(/\s*\(.*?$/g, '').replace(/\s*—.*$/g, '').trim()];
+        }
+        var title = decodeHtmlEntities(String(m[1]).trim());
+        return title ? [title] : [];
+      });
+  };
+
+  // Sin API key configurada -> directamente el fallback web (og:title).
+  if (!apiKey) return fromWeb();
+
   var apiUrl = 'https://api.themoviedb.org/3/' + kind + '/' + encodeURIComponent(String(tmdbId)) +
-    '?api_key=' + TMDB_API_KEY + '&language=es-ES';
+    '?api_key=' + apiKey + '&language=es-ES';
 
   return fetchWithTimeout(apiUrl, { headers: { 'User-Agent': USER_AGENT } })
     .then(function (res) { return res && res.ok ? res.json() : null; })
@@ -365,24 +391,9 @@ function resolveTitleCandidates(tmdbId, mediaType) {
         if (original && candidates.indexOf(original) === -1) candidates.push(original);
       }
       if (candidates.length > 0) return candidates;
-
-      var webUrl = 'https://www.themoviedb.org/' + kind + '/' + encodeURIComponent(String(tmdbId)) + '?language=es-ES';
-      return fetchWithTimeout(webUrl, { headers: { 'User-Agent': USER_AGENT }, redirect: 'follow' })
-        .then(function (res) { return res && res.ok ? res.text() : null; })
-        .catch(function () { return null; })
-        .then(function (html) {
-          if (!html) return [];
-          var m = html.match(/<meta property="og:title" content="([^"]+)"/);
-          if (!m) {
-            var t = html.match(/<title>([^<]+)<\/title>/);
-            if (!t) return [];
-            m = [null, t[1].replace(/\s*\(.*?$/g, '').replace(/\s*—.*$/g, '').trim()];
-          }
-          var title = decodeHtmlEntities(String(m[1]).trim());
-          return title ? [title] : [];
-        });
+      return fromWeb();
     })
-    .catch(function () { return []; });
+    .catch(function () { return fromWeb(); });
 }
 
 /** Variantes de búsqueda a partir de los títulos candidatos. */
@@ -565,7 +576,7 @@ function noteResolveFail(reason) {
 }
 
 /**
- * GET /t/{token} -> {"e":"<iframe src=\"...\">"}. Extrae el src del iframe.
+ * GET /t/{token} -> {"e":"<iframe src=\">..."}". Extrae el src del iframe.
  * Devuelve { url } | { suspended: true } | null.
  */
 function resolveToken(tokenUrl, referer) {
@@ -834,6 +845,8 @@ async function onSettings() {
     { type: 'info', label: 'Obtén las cookies en series.ly: F12 -> Application -> Cookies (ver README.md)' },
     { type: 'text', key: 'session', label: 'Cookie seriesly_session', placeholder: 'eyJpdiI6...', isPassword: true, description: 'Caduca ~1 mes' },
     { type: 'text', key: 'xsrf', label: 'Cookie XSRF-TOKEN', placeholder: 'eyJpdiI6...', isPassword: true, description: 'Se acepta URL-encoded o decodificada' },
+    { type: 'header', label: 'TMDB' },
+    { type: 'text', key: 'tmdbKey', label: 'TMDB API Key (opcional)', placeholder: 'Tu API key v3 de themoviedb.org', description: 'Mejora la resolución de títulos. Sin key se usa la web de TMDB.' },
     { type: 'header', label: 'Preferencias' },
     {
       type: 'select', key: 'language', label: 'Idioma preferido', options: [
