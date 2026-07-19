@@ -144,9 +144,10 @@ function diagEnabled() {
 }
 
 function diagStream() {
+  var msg = LAST_DIAG || 'Sin resultados: revisa cookies y estado de la cuenta';
   return [{
-    name: 'series.ly - diagnóstico',
-    title: LAST_DIAG || 'Sin resultados: revisa cookies y estado de la cuenta',
+    name: 'series.ly - diag: ' + msg,
+    title: msg,
     url: 'about:error'
   }];
 }
