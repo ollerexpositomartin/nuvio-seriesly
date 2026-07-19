@@ -90,7 +90,8 @@ function createMockFetch() {
     if (m) {
       const titles = {
         'movie:603': { title: 'Matrix', original_title: 'The Matrix' },
-        'tv:125988': { name: 'Silo', original_name: 'Silo' }
+        'tv:125988': { name: 'Silo', original_name: 'Silo' },
+        'tv:60625': { name: 'Rick y Morty', original_name: 'Rick and Morty' }
       };
       const data = titles[m[1] + ':' + m[2]];
       return Promise.resolve(data ? makeRes(data) : makeRes({}, { status: 404 }));
@@ -101,7 +102,8 @@ function createMockFetch() {
     if (tw) {
       const titles = {
         'movie:603': 'Matrix',
-        'tv:125988': 'Silo'
+        'tv:125988': 'Silo',
+        'tv:60625': 'Rick y Morty'
       };
       const title = titles[tw[1] + ':' + tw[2]] || '';
       return Promise.resolve(makeRes(
@@ -117,7 +119,9 @@ function createMockFetch() {
       try { q = JSON.parse(options.body).query; } catch (e) { /* noop */ }
       const postsByQuery = {
         'Matrix': [{ tmdb_id: 603, link: '/peliculas/matrix', title: 'Matrix', type: 'movie' }],
-        'Silo': [{ tmdb_id: 125988, link: '/series/silo', title: 'Silo', type: 'serie' }]
+        'Silo': [{ tmdb_id: 125988, link: '/series/silo', title: 'Silo', type: 'serie' }],
+        // tmdb_id distinto: fuerza el fallback por coincidencia de título.
+        'Rick y Morty': [{ tmdb_id: 99999, link: '/series/rick-y-morty', title: 'Rick y Morty', type: 'serie' }]
       };
       return Promise.resolve(makeRes({ posts: postsByQuery[q] || [] }));
     }
@@ -130,6 +134,16 @@ function createMockFetch() {
     if (u === 'https://series.ly/series/silo/1x1') {
       calls.page++;
       return Promise.resolve(makeRes(epHtml, { url: u }));
+    }
+    if (u === 'https://series.ly/series/rick-y-morty/1x1') {
+      calls.page++;
+      return Promise.resolve(makeRes(
+        '<!DOCTYPE html><html><body>' +
+        '<button x-on:click="playLink(\'https://series.ly/t/rm001\', \'1\', \'\', { server: \'FILEMOON\', quality: \'HD 1080p\', language: \'Español - España\' })"></button>' +
+        '<button x-on:click="playLink(\'https://series.ly/t/rm002\', \'1\', \'\', { server: \'STREAMTAPE\', quality: \'HD 720p\', language: \'Español - Latino\' })"></button>' +
+        '</body></html>',
+        { url: u }
+      ));
     }
 
     // Resolución de tokens -> embed falso
@@ -190,6 +204,8 @@ async function testOnSettingsBlueprint(provider) {
 
   check('toggle "includeSubbed" con defaultValue true',
     byKey.includeSubbed && byKey.includeSubbed.type === 'toggle' && byKey.includeSubbed.defaultValue === true);
+  check('toggle "allowTitleFallback" con defaultValue true',
+    byKey.allowTitleFallback && byKey.allowTitleFallback.type === 'toggle' && byKey.allowTitleFallback.defaultValue === true);
 }
 
 async function testSettingsAreRead(provider) {
@@ -337,8 +353,32 @@ async function testNoSessionDegradation() {
   }
 }
 
+async function testTitleFallback(provider) {
+  console.log('\n[7] Fallback por título cuando series.ly no tiene el tmdb_id exacto');
+  const env = installMock({ session: TEST_SESSION, xsrf: TEST_XSRF, language: 'es', includeSubbed: true, allowTitleFallback: true });
+  try {
+    const streams = await provider.getStreams(60625, 'tv', 1, 1);
+    check('Rick y Morty 1x1: encuentra streams por coincidencia de título', streams.length >= 2, 'obtenidos: ' + streams.length);
+    const cast = streams.filter(function (s) { return s.name.indexOf('(Castellano)') !== -1; });
+    const lat = streams.filter(function (s) { return s.name.indexOf('(Latino)') !== -1; });
+    check('Rick y Morty: al menos 1 Castellano y 1 Latino', cast.length >= 1 && lat.length >= 1,
+      'cast=' + cast.length + ' lat=' + lat.length);
+  } finally {
+    env.restore();
+  }
+
+  // Con el fallback desactivado no debe encontrar nada (tmdb_id no coincide).
+  const env2 = installMock({ session: TEST_SESSION, xsrf: TEST_XSRF, language: 'es', includeSubbed: true, allowTitleFallback: false, diagnostico: false });
+  try {
+    const streams = await provider.getStreams(60625, 'tv', 1, 1);
+    check('allowTitleFallback=false: no devuelve streams si tmdb_id no coincide', streams.length === 0, 'obtenidos: ' + streams.length);
+  } finally {
+    env2.restore();
+  }
+}
+
 function testManifest() {
-  console.log('\n[7] manifest.json');
+  console.log('\n[8] manifest.json');
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
   const entry = Array.isArray(manifest)
     ? manifest[0]
@@ -358,6 +398,7 @@ async function main() {
   await testLanguageOrdering(provider);
   await testIncludeSubbed(provider);
   await testNoSessionDegradation();
+  await testTitleFallback(provider);
   testManifest();
 
   console.log('\n=================================');

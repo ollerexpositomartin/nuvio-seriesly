@@ -144,6 +144,10 @@ function diagEnabled() {
   return !!getSettings().diagnostico;
 }
 
+function titleFallbackEnabled() {
+  return getSettings().allowTitleFallback !== false;
+}
+
 function diagStream() {
   var msg = LAST_DIAG || 'Sin resultados: revisa cookies y estado de la cuenta';
   if (SEARCH_DIAG) msg += ' | busqueda:' + SEARCH_DIAG.slice(0, 240);
@@ -428,9 +432,18 @@ function buildQueryVariants(candidates) {
 /**
  * POST /api/search/posts {"query": ...}. Devuelve el post cuyo tmdb_id
  * coincide exactamente (normalizado a string), o null.
+ *
+ * Fallback: si ningún post trae el tmdb_id exacto, se acepta el primer post
+ * cuyo título coincida exactamente con la query (ignorando año entre
+ * paréntesis). Esto cubre fichas de series.ly que aún no tienen el enlace a
+ * TMDB asociado.
  */
 /** Detalle de los intentos de búsqueda (para el modo diagnóstico). */
 var SEARCH_DIAG = '';
+
+function normalizeTitle(s) {
+  return String(s || '').toLowerCase().replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+}
 
 function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
   var wanted = String(tmdbId);
@@ -440,6 +453,7 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
   var attempt = function (index) {
     if (index >= queryVariants.length) return Promise.resolve(null);
     var q = queryVariants[index];
+    var qNorm = normalizeTitle(q);
 
     return fetchWithRetry(BASE_URL + '/api/search/posts', {
       method: 'POST',
@@ -473,14 +487,25 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
         }
         var posts = data && data.posts;
         if (posts && posts.length) {
+          var fallbackByTitle = null;
           for (var i = 0; i < posts.length; i++) {
             var p = posts[i];
-            if (p && String(p.tmdb_id) === wanted && typeof p.link === 'string') {
-              // type: "movie" | "serie"; si no viene, se acepta igualmente.
-              if (!p.type || p.type === wantedType) return p;
+            if (!p || typeof p.link !== 'string') continue;
+            if (p.type && p.type !== wantedType) continue;
+            if (String(p.tmdb_id) === wanted) return p;
+            // Fallback por título exacto (solo si el usuario lo permite).
+            if (titleFallbackEnabled() && !fallbackByTitle && normalizeTitle(p.title || p.name) === qNorm) {
+              fallbackByTitle = p;
             }
           }
-          SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, ninguno con tmdb_id ' + wanted + ']';
+          if (fallbackByTitle) {
+            SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, usado por título (tmdb_id ' + wanted + ' no coincidió)]';
+            return fallbackByTitle;
+          }
+          var postsInfo = posts.map(function (p) {
+            return '{tmdb_id:' + (p.tmdb_id || 'null') + ', title:"' + (p.title || p.name || '') + '"}';
+          }).join(', ');
+          SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, ninguno con tmdb_id ' + wanted + ': ' + postsInfo + ']';
         } else {
           SEARCH_DIAG += ' ["' + q + '": 0 posts]';
         }
@@ -747,9 +772,17 @@ function findPostBySlug(tmdbId, mediaType, candidates) {
 
     return getWithSession(BASE_URL + link).then(function (r) {
       if (r && warnIfExpired(r.res, r.text)) return null;
-      if (r && r.res && r.res.ok && r.text && r.text.indexOf(tmdbPath) !== -1) {
-        SEARCH_DIAG += ' [slug directo OK: ' + link + ']';
-        return { link: link, title: candidates[index] };
+      if (r && r.res && r.res.ok && r.text) {
+        if (r.text.indexOf(tmdbPath) !== -1) {
+          SEARCH_DIAG += ' [slug directo OK (TMDB): ' + link + ']';
+          return { link: link, title: candidates[index] };
+        }
+        // Fallback: si la página tiene enlaces playLink, la aceptamos aunque
+        // no incluya el enlace a TMDB (series.ly a veces no lo expone).
+        if (r.text.indexOf('playLink(') !== -1) {
+          SEARCH_DIAG += ' [slug directo OK (links): ' + link + ']';
+          return { link: link, title: candidates[index] };
+        }
       }
       if (r && r.res && r.res.status && r.res.status !== 404) {
         SEARCH_DIAG += ' [' + link + ': HTTP ' + r.res.status + ']';
@@ -873,6 +906,7 @@ async function onSettings() {
       ], defaultValue: 'es'
     },
     { type: 'toggle', key: 'includeSubbed', label: 'Incluir subtitulado', defaultValue: true },
+    { type: 'toggle', key: 'allowTitleFallback', label: 'Permitir fallback por título', defaultValue: true, description: 'Si series.ly no tiene el mismo TMDB id, busca por título exacto' },
     { type: 'header', label: 'Pruebas' },
     { type: 'info', label: 'Activa el modo diagnóstico y pulsa "Probar proveedor" para ver el motivo si no hay streams.' },
     { type: 'toggle', key: 'diagnostico', label: 'Modo diagnóstico', defaultValue: false }
