@@ -96,6 +96,20 @@ function createMockFetch() {
       return Promise.resolve(data ? makeRes(data) : makeRes({}, { status: 404 }));
     }
 
+    // Fallback web de TMDB (og:title) cuando no hay API key configurada
+    const tw = u.match(/www\.themoviedb\.org\/(movie|tv)\/(\d+)/);
+    if (tw) {
+      const titles = {
+        'movie:603': 'Matrix',
+        'tv:125988': 'Silo'
+      };
+      const title = titles[tw[1] + ':' + tw[2]] || '';
+      return Promise.resolve(makeRes(
+        '<!doctype html><html><head><meta property="og:title" content="' + title + '"></head><body></body></html>',
+        { url: u }
+      ));
+    }
+
     // Búsqueda en series.ly
     if (u === 'https://series.ly/api/search/posts') {
       calls.search++;
@@ -209,8 +223,16 @@ async function testSettingsAreRead(provider) {
 async function testFallbackToFileConstants(provider) {
   console.log('\n[3] Fallback: sin SCRAPER_SETTINGS se usan las constantes del archivo');
   const env = installMock(undefined); // sin ajustes de la app
+  // El archivo publicado tiene las constantes vacías por seguridad; para
+  // probar el fallback cargamos el provider con cookies de prueba inyectadas.
+  const code = fs.readFileSync(PROVIDER_FILE, 'utf8')
+    .replace(/^var SESSION_COOKIE = .*$/m, "var SESSION_COOKIE = '" + TEST_SESSION + "';")
+    .replace(/^var XSRF_TOKEN = .*$/m, "var XSRF_TOKEN = '" + TEST_XSRF + "';");
+  const mod = { exports: {} };
+  new Function('module', 'exports', 'require', code)(mod, mod.exports, require);
+  const isolated = mod.exports;
   try {
-    const streams = await provider.getStreams(603, 'movie');
+    const streams = await isolated.getStreams(603, 'movie');
     check('sigue funcionando (8 streams)', streams.length === 8, 'obtenidos: ' + streams.length);
     check('la Cookie usa la constante SESSION_COOKIE del archivo',
       !!env.calls.cookie && env.calls.cookie.indexOf('seriesly_session=eyJpdiI6IlEyd0JlR0hp') !== -1,
@@ -318,9 +340,11 @@ async function testNoSessionDegradation() {
 function testManifest() {
   console.log('\n[7] manifest.json');
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  const entry = Array.isArray(manifest) ? manifest[0] : manifest;
+  const entry = Array.isArray(manifest)
+    ? manifest[0]
+    : (manifest.scrapers && manifest.scrapers[0]) || manifest;
   check('hasSettings: true', entry.hasSettings === true);
-  check('version 1.1.0', entry.version === '1.1.0', entry.version);
+  check('version 1.2.5', entry.version === '1.2.5', entry.version);
 }
 
 // ------------------------- main -------------------------

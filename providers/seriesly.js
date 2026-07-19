@@ -76,8 +76,9 @@ function tmdbApiKey() {
 
 // Prioridad de idioma (menor = antes): España y Latino primero, Subtitulado después.
 var LANGUAGE_RULES = [
-  [/españ?a/i, 'Castellano', 0],
+  // Latino se evalúa antes que Castellano para no confundir "Español - Latino".
   [/latino/i, 'Latino', 1],
+  [/españ[oa]?/i, 'Castellano', 0],
   [/subtitul/i, 'Subtitulado', 2]
 ];
 
@@ -145,6 +146,8 @@ function diagEnabled() {
 
 function diagStream() {
   var msg = LAST_DIAG || 'Sin resultados: revisa cookies y estado de la cuenta';
+  if (SEARCH_DIAG) msg += ' | busqueda:' + SEARCH_DIAG.slice(0, 240);
+  if (RESOLVE_DIAG) msg += ' | resolucion:' + RESOLVE_DIAG.slice(0, 240);
   return [{
     name: 'series.ly - diag: ' + msg,
     title: msg,
@@ -307,6 +310,8 @@ function isSessionExpired(res, body) {
     if (body.indexOf('"Unauthenticated"') !== -1) return true;
     // Formulario de login (campo password + acción de ingreso).
     if (/type="password"/i.test(body) && /ingresar|iniciar sesi[oó]n|entrar/i.test(body)) return true;
+    // series.ly pide verificar el email antes de permitir navegación.
+    if (/verificar\s+(su|tu)\s+direcci[oó]n\s+de\s+email/i.test(body)) return true;
   }
   return false;
 }
@@ -498,33 +503,42 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
  *   x-on:click="playLink('https://series.ly/t/{TOKEN}', '986296', '', {
  *       server: 'FILEMOON', quality: 'HD 1080p', language: 'Español - España', ... })"
  * Devuelve [{ tokenUrl, server, quality, language }].
+ *
+ * Se usa un parser ligero: busca cada llamada playLink(...), extrae el primer
+ * argumento (token) y luego lee server/quality/language con regex sencillas.
+ * Así se toleran cambios de orden, comillas simples/dobles, espacios y tokens
+ * relativos (/t/...) además de URLs absolutas.
  */
 function extractLinks(html) {
   var links = [];
   if (!html) return links;
 
-  var patterns = [
-    // Variante verificada (comillas simples).
-    /playLink\('(https:\/\/series\.ly\/t\/[^']+)'[^)]*server:\s*'([^']+)'[^)]*quality:\s*'([^']+)'[^)]*language:\s*'([^']+)'/g,
-    // Variante tolerante: comillas escapadas \" (HTML dentro de atributo/JSON).
-    /playLink\(\\?["'](https:\/\/series\.ly\/t\/[^\\?"']+)\\?["'][^)]*server:\s*\\?["']([^\\"']+)\\?["'][^)]*quality:\s*\\?["']([^\\"']+)\\?["'][^)]*language:\s*\\?["']([^\\"']+)\\?["']/g
-  ];
-
   var seen = {};
-  patterns.forEach(function (re) {
-    var m;
-    while ((m = re.exec(html)) !== null) {
-      var tokenUrl = m[1];
-      if (seen[tokenUrl]) continue;
-      seen[tokenUrl] = true;
-      links.push({
-        tokenUrl: tokenUrl,
-        server: m[2],
-        quality: m[3],
-        language: m[4]
-      });
-    }
-  });
+  var callRe = /playLink\s*\(([\s\S]*?)\)\s*(?=[;"'])/g;
+  var m;
+  while ((m = callRe.exec(html)) !== null) {
+    var args = m[1];
+
+    // Token: URL absoluta o relativa, con comillas simples o dobles.
+    var tokenMatch = args.match(/["'](https?:\/\/series\.ly\/t\/[^"']+|[\/]t\/[^"']+)["']/);
+    if (!tokenMatch) continue;
+    var tokenUrl = tokenMatch[1];
+    if (tokenUrl.charAt(0) === '/') tokenUrl = BASE_URL + tokenUrl;
+    if (seen[tokenUrl]) continue;
+
+    var server = (args.match(/server\s*:\s*["']([^"']+)["']/i) || [])[1] || '';
+    var quality = (args.match(/quality\s*:\s*["']([^"']+)["']/i) || [])[1] || '';
+    var language = (args.match(/language\s*:\s*["']([^"']+)["']/i) || [])[1] || '';
+
+    seen[tokenUrl] = true;
+    links.push({
+      tokenUrl: tokenUrl,
+      server: server,
+      quality: quality,
+      language: language
+    });
+  }
+
   return links;
 }
 
@@ -603,7 +617,9 @@ function resolveToken(tokenUrl, referer) {
       var data = JSON.parse(body);
       if (data && typeof data.e === 'string') html = data.e;
     } catch (e) { /* no era JSON: se intenta regex sobre el cuerpo crudo */ }
-    var m = html.match(/src=\\?"([^"\\]+)/);
+    // Captura src con comillas simples, dobles (posiblemente escapadas) o sin comillas.
+    var m = html.match(/src\s*=\s*\\?['"]([^'"\\]+)\\?['"]/i);
+    if (!m) m = html.match(/src\s*=\s*([^\s>]+)/i);
     if (!m) {
       noteResolveFail('respuesta de /t/ sin iframe: ' + String(body).replace(/\s+/g, ' ').slice(0, 60));
       return null;
