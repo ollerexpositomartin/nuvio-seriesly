@@ -521,8 +521,10 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
           for (var i = 0; i < posts.length; i++) {
             var p = posts[i];
             if (!p || typeof p.link !== 'string') continue;
-            if (p.type && p.type !== wantedType) continue;
+            // Si el tmdb_id coincide exactamente, aceptamos el post aunque el
+            // type de series.ly sea distinto (p. ej. 'anime' en lugar de 'serie').
             if (String(p.tmdb_id).trim() === wanted) return p;
+            if (p.type && p.type !== wantedType) continue;
             // Fallback por título exacto (solo si el usuario lo permite).
             if (titleFallbackEnabled() && !fallbackByTitle && normalizeTitle(p.title || p.name) === qNorm) {
               fallbackByTitle = p;

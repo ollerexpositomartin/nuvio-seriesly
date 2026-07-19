@@ -120,8 +120,9 @@ function createMockFetch() {
       const postsByQuery = {
         'Matrix': [{ tmdb_id: 603, link: '/peliculas/matrix', title: 'Matrix', type: 'movie' }],
         'Silo': [{ tmdb_id: 125988, link: '/series/silo', title: 'Silo', type: 'serie' }],
-        // tmdb_id distinto: fuerza el fallback por coincidencia de título.
-        'Rick y Morty': [{ tmdb_id: 99999, link: '/series/rick-y-morty', title: 'Rick y Morty', type: 'serie' }]
+        // tmdb_id correcto pero type 'anime' (series.ly a veces clasifica
+        // series animadas así); el plugin debe aceptar por tmdb_id exacto.
+        'Rick y Morty': [{ tmdb_id: 60625, link: '/series/rick-y-morty', title: 'Rick y Morty', type: 'anime' }]
       };
       return Promise.resolve(makeRes({ posts: postsByQuery[q] || [] }));
     }
@@ -360,12 +361,12 @@ async function testNoSessionDegradation() {
   }
 }
 
-async function testTitleFallback(provider) {
-  console.log('\n[7] Fallback por título cuando series.ly no tiene el tmdb_id exacto');
+async function testTmdbIdIgnoresType(provider) {
+  console.log('\n[7] Acepta tmdb_id exacto aunque el type de series.ly no sea el esperado');
   const env = installMock({ session: TEST_SESSION, xsrf: TEST_XSRF, language: 'es', includeSubbed: true, allowTitleFallback: true });
   try {
     const streams = await provider.getStreams(60625, 'tv', 1, 1);
-    check('Rick y Morty 1x1: encuentra streams por coincidencia de título', streams.length >= 2, 'obtenidos: ' + streams.length);
+    check('Rick y Morty 1x1 (type=anime): encuentra streams por tmdb_id exacto', streams.length >= 2, 'obtenidos: ' + streams.length);
     const cast = streams.filter(function (s) { return s.name.indexOf('(Castellano)') !== -1; });
     const lat = streams.filter(function (s) { return s.name.indexOf('(Latino)') !== -1; });
     check('Rick y Morty: al menos 1 Castellano y 1 Latino', cast.length >= 1 && lat.length >= 1,
@@ -374,12 +375,12 @@ async function testTitleFallback(provider) {
     env.restore();
   }
 
-  // Con el fallback por título desactivado, el plugin verifica la página web
-  // del post: si contiene el enlace a themoviedb.org/tv/60625, lo acepta.
+  // Con el fallback por título desactivado sigue funcionando porque el
+  // tmdb_id coincide exactamente.
   const env2 = installMock({ session: TEST_SESSION, xsrf: TEST_XSRF, language: 'es', includeSubbed: true, allowTitleFallback: false, diagnostico: false });
   try {
     const streams = await provider.getStreams(60625, 'tv', 1, 1);
-    check('Verificación de página TMDB: encuentra streams aunque la API no devuelva tmdb_id', streams.length >= 2, 'obtenidos: ' + streams.length);
+    check('allowTitleFallback=false: acepta por tmdb_id exacto aunque type no sea serie', streams.length >= 2, 'obtenidos: ' + streams.length);
   } finally {
     env2.restore();
   }
@@ -406,7 +407,7 @@ async function main() {
   await testLanguageOrdering(provider);
   await testIncludeSubbed(provider);
   await testNoSessionDegradation();
-  await testTitleFallback(provider);
+  await testTmdbIdIgnoresType(provider);
   testManifest();
 
   console.log('\n=================================');
