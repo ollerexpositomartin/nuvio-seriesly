@@ -433,10 +433,10 @@ function buildQueryVariants(candidates) {
  * POST /api/search/posts {"query": ...}. Devuelve el post cuyo tmdb_id
  * coincide exactamente (normalizado a string), o null.
  *
- * Fallback: si ningún post trae el tmdb_id exacto, se acepta el primer post
- * cuyo título coincida exactamente con la query (ignorando año entre
- * paréntesis). Esto cubre fichas de series.ly que aún no tienen el enlace a
- * TMDB asociado.
+ * Fallbacks cuando no hay coincidencia exacta de tmdb_id:
+ *   1. Verificar la página de cada post: la API a veces no devuelve tmdb_id
+ *      aunque la ficha web sí contenga el enlace a themoviedb.org.
+ *   2. Coincidencia exacta de título (solo si el usuario lo permite).
  */
 /** Detalle de los intentos de búsqueda (para el modo diagnóstico). */
 var SEARCH_DIAG = '';
@@ -445,9 +445,39 @@ function normalizeTitle(s) {
   return String(s || '').toLowerCase().replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
 }
 
+function pageContainsTmdb(pageUrl, tmdbPath) {
+  return getWithSession(pageUrl).then(function (r) {
+    if (!r || !r.res || !r.res.ok || !r.text) return false;
+    if (warnIfExpired(r.res, r.text)) return false;
+    return r.text.indexOf(tmdbPath) !== -1;
+  }).catch(function () { return false; });
+}
+
+function verifyPosts(posts, wantedType, tmdbPath) {
+  var candidates = [];
+  for (var i = 0; i < posts.length && i < 3; i++) {
+    var p = posts[i];
+    if (p && typeof p.link === 'string' && (!p.type || p.type === wantedType)) {
+      candidates.push(p);
+    }
+  }
+  if (!candidates.length) return Promise.resolve(null);
+  function tryNext(index) {
+    if (index >= candidates.length) return Promise.resolve(null);
+    return pageContainsTmdb(BASE_URL + candidates[index].link, tmdbPath).then(function (ok) {
+      if (ok) return candidates[index];
+      return tryNext(index + 1);
+    });
+  }
+  return tryNext(0);
+}
+
 function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
   var wanted = String(tmdbId);
   var wantedType = mediaType === 'tv' ? 'serie' : 'movie';
+  var tmdbPath = mediaType === 'tv'
+    ? 'themoviedb.org/tv/' + tmdbId
+    : 'themoviedb.org/movie/' + tmdbId;
   SEARCH_DIAG = '';
 
   var attempt = function (index) {
@@ -492,7 +522,7 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
             var p = posts[i];
             if (!p || typeof p.link !== 'string') continue;
             if (p.type && p.type !== wantedType) continue;
-            if (String(p.tmdb_id) === wanted) return p;
+            if (String(p.tmdb_id).trim() === wanted) return p;
             // Fallback por título exacto (solo si el usuario lo permite).
             if (titleFallbackEnabled() && !fallbackByTitle && normalizeTitle(p.title || p.name) === qNorm) {
               fallbackByTitle = p;
@@ -502,10 +532,18 @@ function searchOnSeriesly(tmdbId, mediaType, queryVariants) {
             SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, usado por título (tmdb_id ' + wanted + ' no coincidió)]';
             return fallbackByTitle;
           }
-          var postsInfo = posts.map(function (p) {
-            return '{tmdb_id:' + (p.tmdb_id || 'null') + ', title:"' + (p.title || p.name || '') + '"}';
-          }).join(', ');
-          SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, ninguno con tmdb_id ' + wanted + ': ' + postsInfo + ']';
+          // Verificar páginas: la API a veces omite tmdb_id aunque la ficha web sí lo tenga.
+          return verifyPosts(posts, wantedType, tmdbPath).then(function (verifiedPost) {
+            if (verifiedPost) {
+              SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, encontrado verificando la página con tmdb_id ' + wanted + ']';
+              return verifiedPost;
+            }
+            var postsInfo = posts.map(function (p) {
+              return '{tmdb_id:' + (p.tmdb_id || 'null') + ', title:"' + (p.title || p.name || '') + '"}';
+            }).join(', ');
+            SEARCH_DIAG += ' ["' + q + '": ' + posts.length + ' posts, ninguno con tmdb_id ' + wanted + ': ' + postsInfo + ']';
+            return attempt(index + 1);
+          });
         } else {
           SEARCH_DIAG += ' ["' + q + '": 0 posts]';
         }

@@ -135,6 +135,13 @@ function createMockFetch() {
       calls.page++;
       return Promise.resolve(makeRes(epHtml, { url: u }));
     }
+    if (u === 'https://series.ly/series/rick-y-morty') {
+      calls.page++;
+      return Promise.resolve(makeRes(
+        '<!DOCTYPE html><html><body><a href="https://www.themoviedb.org/tv/60625">TMDB</a></body></html>',
+        { url: u }
+      ));
+    }
     if (u === 'https://series.ly/series/rick-y-morty/1x1') {
       calls.page++;
       return Promise.resolve(makeRes(
@@ -367,11 +374,12 @@ async function testTitleFallback(provider) {
     env.restore();
   }
 
-  // Con el fallback desactivado no debe encontrar nada (tmdb_id no coincide).
+  // Con el fallback por título desactivado, el plugin verifica la página web
+  // del post: si contiene el enlace a themoviedb.org/tv/60625, lo acepta.
   const env2 = installMock({ session: TEST_SESSION, xsrf: TEST_XSRF, language: 'es', includeSubbed: true, allowTitleFallback: false, diagnostico: false });
   try {
     const streams = await provider.getStreams(60625, 'tv', 1, 1);
-    check('allowTitleFallback=false: no devuelve streams si tmdb_id no coincide', streams.length === 0, 'obtenidos: ' + streams.length);
+    check('Verificación de página TMDB: encuentra streams aunque la API no devuelva tmdb_id', streams.length >= 2, 'obtenidos: ' + streams.length);
   } finally {
     env2.restore();
   }
